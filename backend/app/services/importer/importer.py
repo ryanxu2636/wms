@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     ImportBatch,
     ImportError,
+    Outbound,
     Package,
     PackageItem,
     ReviewQueue,
@@ -211,6 +212,14 @@ def commit_import(file_bytes: bytes, db: Session, operator: str = "", overwrite:
             )
             db.add(pkg)
             db.flush()
+
+            # 1:1 创建出库单（数据字典 §4.6），打包后打印/出库环节依赖
+            db.add(Outbound(
+                package_id=pkg.id,
+                outbound_no=f"OB-{pkg.package_no}",
+                status="pending",
+                label_printed=0,
+            ))
 
         is_virtual = 1 if item["rule_action"] == "skip" else 0
         pi = PackageItem(
