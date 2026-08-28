@@ -6,7 +6,8 @@ from app.api import (
     transition,
     picking,
     outbound,
+    auth,
     print as print_api,
 )
 
-__all__ = ["stock", "putaway", "allocation", "transition", "picking", "outbound", "print_api"]
+__all__ = ["stock", "putaway", "allocation", "transition", "picking", "outbound", "print_api", "auth"]

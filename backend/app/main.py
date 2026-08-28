@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app.api import (
     allocation,
+    auth,
     importer,
     outbound,
     picking,
@@ -47,6 +48,7 @@ app.include_router(transition.router, prefix=settings.api_prefix)
 app.include_router(picking.router, prefix=settings.api_prefix)
 app.include_router(outbound.router, prefix=settings.api_prefix)
 app.include_router(print_api.router, prefix=settings.api_prefix)
+app.include_router(auth.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

@@ -12,6 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BizError
+from app.core.security import write_operation_log
 from app.models.fulfillment import Outbound, Package, PackageItem
 from app.models.print_domain import PrintQueue, PrintTemplate
 from app.services import yuntu_client
@@ -115,6 +116,18 @@ def _mark_printed_for_package(db: Session, package_id: int) -> None:
     if ob is not None and not ob.label_printed:
         ob.label_printed = 1
         db.flush()
+
+        # 强制留痕点：面单打印（对账需要）
+        pkg = db.get(Package, package_id)
+        write_operation_log(
+            db,
+            user_id=ob.updated_by,
+            module="print",
+            action="mark_printed",
+            ref_type="outbound",
+            ref_id=ob.id,
+            detail=f"包裹 {pkg.package_no if pkg else package_id} 面单已打印，出库单 {ob.outbound_no}",
+        )
 
 
 def process_queue(db: Session, queue_ids: list[int] | None = None) -> dict:

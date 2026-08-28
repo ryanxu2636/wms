@@ -9,6 +9,7 @@ from app.core.exceptions import LabelNotPrintedError, AlreadyShippedError
 from app.core.state_machine import assert_can_transition
 from app.models.fulfillment import Outbound, Package, PackageItem
 from app.models.inventory import Allocation
+from app.core.security import write_operation_log
 from app.services import stock_service
 
 
@@ -57,3 +58,14 @@ def ship(db: Session, outbound_id: int) -> None:
     ob.shipped_at = datetime.now()
     pkg.status = "outbound"
     db.flush()
+
+    # 强制留痕点：出库（对账需要）
+    write_operation_log(
+        db,
+        user_id=ob.updated_by,
+        module="outbound",
+        action="ship",
+        ref_type="outbound",
+        ref_id=ob.id,
+        detail=f"出库单 {ob.outbound_no} 已出库，包裹 {pkg.package_no}",
+    )
