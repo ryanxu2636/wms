@@ -8,6 +8,7 @@ from app.api import (
     importer,
     outbound,
     picking,
+    print as print_api,
     putaway,
     rules,
     sku,
@@ -45,6 +46,7 @@ app.include_router(allocation.router, prefix=settings.api_prefix)
 app.include_router(transition.router, prefix=settings.api_prefix)
 app.include_router(picking.router, prefix=settings.api_prefix)
 app.include_router(outbound.router, prefix=settings.api_prefix)
+app.include_router(print_api.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

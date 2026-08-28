@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # 出库卡点：面单未打印禁止出库（T3.1 打印门）
     REQUIRE_LABEL_PRINTED: bool = True
 
+    # 云途 YunExpress OMS 面单打印（T3.1，密钥走环境变量/.env）
+    YUNTU_LABEL_PRINT_URL: str = "http://oms.api.yunexpress.com/api/Label/Print"
+    YUNTU_USERNAME: str = "CN5834"
+    YUNTU_PASSWORD: str = "oHRl28wOmQo"
+    YUNTU_BATCH_SIZE: int = 20
+    YUNTU_TIMEOUT: int = 30
+
     class Config:
         env_file = ".env"
         extra = "ignore"
