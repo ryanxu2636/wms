@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WMS 仓储管理 · S2 库存/库位/订单履约</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.7.6/dist/index.css" />
+  <style>
+    :root {
+      --wms-primary: #409eff;
+      --wms-bg: #f5f7fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--wms-bg);
+      color: #303133;
+    }
+    #app { min-height: 100vh; }
+    .app-header {
+      background: #fff;
+      border-bottom: 1px solid #e4e7ed;
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .app-header .brand {
+      font-size: 18px;
+      font-weight: 700;
+      color: #303133;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .app-header .brand .logo {
+      width: 28px; height: 28px;
+      background: var(--wms-primary);
+      border-radius: 6px;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 15px; font-weight: 700;
+    }
+    .api-status { font-size: 13px; color: #909399; display: flex; align-items: center; gap: 8px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.ok { background: #67c23a; }
+    .dot.fail { background: #f56c6c; }
+    .main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 20px 24px 40px;
+    }
+    .stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+    .stat-card {
+      background: #fff; border-radius: 8px; padding: 18px 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    .stat-card .label { font-size: 13px; color: #909399; }
+    .stat-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    .stat-card .value.pending { color: #e6a23c; }
+    .stat-card .value.active { color: var(--wms-primary); }
+    .stat-card .value.done { color: #67c23a; }
+    .panel {
+      background: #fff; border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+      padding: 20px;
+    }
+    .panel + .panel { margin-top: 20px; }
+    .panel-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+    .toolbar { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .tag-pending { color:#909399; } .tag-assigned{color:#409eff;} .tag-picking{color:#e6a23c;}
+    .tag-checked{color:#67c23a;} .tag-packed{color:#67c23a;} .tag-outbound{color:#67c23a;}
+    .tag-intercepted{color:#f56c6c;} .tag-review{color:#e6a23c;} .tag-shortage{color:#f56c6c;}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="app-header">
+      <div class="brand"><span class="logo">W</span> WMS 仓储管理 · S2 履约链路</div>
+      <div class="api-status">
+        <span class="dot" :class="apiOk ? 'ok' : 'fail'"></span>
+        {{ apiOk ? '后端已连接' : '后端未连接' }}
+        <el-input v-model="apiBase" size="small" style="width:280px" placeholder="http://localhost:8000" @change="probeApi" />
+        <el-button size="small" @click="probeApi">检测</el-button>
+      </div>
+    </div>
+
+    <div class="main">
+      <!-- 统计卡片 -->
+      <div class="stat-cards">
+        <div class="stat-card">
+          <div class="label">待分配订单</div>
+          <div class="value pending">{{ stats.unassigned }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">履约中（已分配~已打包）</div>
+          <div class="value active">{{ stats.inProgress }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">已出库</div>
+          <div class="value done">{{ stats.outbound }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">异常（拦截/复核/缺货）</div>
+          <div class="value pending">{{ stats.abnormal }}</div>
+        </div>
+      </div>
+
+      <!-- 页签 -->
+      <div class="panel">
+        <el-tabs v-model="activeTab" type="border-card">
+          <!-- 订单分配 -->
+          <el-tab-pane label="① 订单分配" name="orders">
+            <div class="toolbar">
+              <el-select v-model="orderFilter" placeholder="状态筛选" clearable style="width:180px">
+                <el-option v-for="s in statusList" :key="s.value" :label="s.label" :value="s.value" />
+              </el-select>
+              <el-button type="primary" @click="loadOrders">刷新订单</el-button>
+              <el-button type="success" @click="batchAllocate">批量分配待分配订单</el-button>
+            </div>
+            <el-table :data="orders" border stripe v-loading="loading.orders" max-height="420">
+              <el-table-column prop="package_no" label="包裹号" width="150" />
+              <el-table-column prop="tracking_no" label="运单号" width="150" />
+              <el-table-column prop="total_qty" label="总数" width="70" />
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }"><span :class="'tag-' + statusClass(row.status)">{{ statusLabel(row.status) }}</span></template>
+              </el-table-column>
+              <el-table-column prop="sla_deadline" label="发货期限" width="180" />
+              <el-table-column label="操作" min-width="220">
+                <template #default="{ row }">
+                  <el-button v-if="row.status==='unassigned'" size="small" type="primary" @click="allocate(row)">分配</el-button>
+                  <el-button v-if="row.status==='assigned'" size="small" type="warning" @click="createTask(row)">生成拣货任务</el-button>
+                  <el-button v-if="row.status==='assigned'" size="small" @click="release(row)">释放</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 拣货 -->
+          <el-tab-pane label="② 拣货" name="picking">
+            <div class="toolbar">
+              <el-input v-model="pickingPackageId" placeholder="输入包裹ID查看拣货项" style="width:220px" />
+              <el-button type="primary" @click="loadPickItems">查看拣货项</el-button>
+              <el-button @click="loadOrders">刷新</el-button>
+            </div>
+            <div v-if="pickItems.length" class="panel" style="box-shadow:none;border:1px solid #ebeef5">
+              <div class="panel-title">拣货项（按库位路径排序，同 SKU 汇总）</div>
+              <el-table :data="pickItems" border stripe>
+                <el-table-column prop="sku_id" label="SKU ID" width="90" />
+                <el-table-column prop="total_qty" label="汇总数量" width="100" />
+                <el-table-column label="库位明细">
+                  <template #default="{ row }">
+                    <el-tag v-for="l in row.locations" :key="l.location_code" size="small" style="margin-right:6px">
+                      {{ l.location_code }} × {{ l.qty }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+            <el-table :data="orders.filter(o=>['picking','assigned'].includes(o.status))" border stripe max-height="320" style="margin-top:12px">
+              <el-table-column prop="package_no" label="包裹号" width="150" />
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }">{{ statusLabel(row.status) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="200">
+                <template #default="{ row }">
+                  <el-button v-if="row.status==='picking'" size="small" type="primary" @click="completePick(row)">拣货完成</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 复核打包 -->
+          <el-tab-pane label="③ 复核/打包" name="checking">
+            <el-table :data="orders.filter(o=>['checked','picking'].includes(o.status))" border stripe max-height="420">
+              <el-table-column prop="package_no" label="包裹号" width="150" />
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }">{{ statusLabel(row.status) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="240">
+                <template #default="{ row }">
+                  <el-button v-if="row.status==='checked'" size="small" @click="checkPackage(row)">复核</el-button>
+                  <el-button v-if="row.status==='checked'" size="small" type="success" @click="pack(row)">打包</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 出库 -->
+          <el-tab-pane label="④ 出库" name="outbound">
+            <el-table :data="orders.filter(o=>o.status==='packed')" border stripe max-height="420">
+              <el-table-column prop="package_no" label="包裹号" width="150" />
+              <el-table-column prop="tracking_no" label="运单号" width="150" />
+              <el-table-column label="操作" width="240">
+                <template #default="{ row }">
+                  <el-button size="small" type="warning" @click="markPrinted(row)">标记面单已打印</el-button>
+                  <el-button size="small" type="primary" @click="ship(row)">出库</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 库存 -->
+          <el-tab-pane label="⑤ 库存" name="stock">
+            <div class="toolbar">
+              <el-button type="primary" @click="loadStock">刷新库存</el-button>
+            </div>
+            <el-table :data="stocks" border stripe v-loading="loading.stock" max-height="420">
+              <el-table-column prop="id" label="ID" width="70" />
+              <el-table-column prop="sku_id" label="SKU" width="80" />
+              <el-table-column prop="location_id" label="库位" width="80" />
+              <el-table-column prop="batch_no" label="批次" width="100" />
+              <el-table-column prop="available_qty" label="可用" width="80" />
+              <el-table-column prop="allocated_qty" label="已分配" width="80" />
+              <el-table-column prop="locked_qty" label="锁定" width="80" />
+              <el-table-column prop="in_transit_qty" label="在途" width="80" />
+              <el-table-column label="流水" width="100">
+                <template #default="{ row }">
+                  <el-button size="small" @click="viewTxn(row)">查看流水</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 库位 -->
+          <el-tab-pane label="⑥ 库位/上架" name="location">
+            <div class="toolbar">
+              <el-input v-model="putawaySkuId" placeholder="SKU ID" style="width:140px" />
+              <el-button type="primary" @click="recommend">上架推荐</el-button>
+              <el-button @click="loadLocations">刷新库位</el-button>
+            </div>
+            <el-alert v-if="recommendResult" :title="recommendResult" type="success" :closable="false" style="margin-bottom:12px" />
+            <el-table :data="locations" border stripe max-height="360">
+              <el-table-column prop="id" label="ID" width="70" />
+              <el-table-column prop="code" label="库位码" width="130" />
+              <el-table-column prop="shelf_no" label="货架" width="80" />
+              <el-table-column prop="column_no" label="列" width="70" />
+              <el-table-column prop="layer_no" label="层" width="70" />
+              <el-table-column prop="status" label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.status==='empty' ? 'info' : 'success'" size="small">{{ row.status }}</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.7.6/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/axios@1.7.5/dist/axios.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
